@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -51,42 +52,64 @@ class AuthenticatedSessionController extends Controller
         return redirect('/');
     }
 
-    public function storeApi(LoginRequest $request): JsonResponse
+    public function storeApi(Request $request): JsonResponse
     {
-        $request->validate([
-            'email' => 'required|string|lowercase|email',
-            'password' => 'required|string',
-        ]);
+        try {
+            $validated = $request->validate([
+                'email' => 'required|string|lowercase|email',
+                'password' => 'required|string',
+            ]);
 
-        // Attempt to authenticate the user credentials
-        if (!Auth::attempt($request->only('email', 'password'))) {
+            // Attempt to authenticate the user credentials
+            if (!Auth::attempt($validated)) {
+                return response()->json([
+                    'message' => 'The provided credentials are incorrect.',
+                ], 401);
+            }
+
+            $user = $request->user();
+
+            $token = $user->createToken('api-token')->plainTextToken;
+
             return response()->json([
-                'message' => 'The provided credentials are incorrect.',
-            ], 401);
+                'message' => 'Authenticated successfully',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role->value,
+                ],
+                'token' => $token,
+            ], 200);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'validation failed',
+                'status' => 'error',
+                'error' => $e->getMessage(),
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'login failed',
+                'status' => 'error',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        $user = $request->user();
-
-        $token = $user->createToken('api-token')->plainTextToken;
-
-        return response()->json([
-            'message' => 'Authenticated successfully',
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role->value,
-            ],
-            'token' => $token,
-        ], 200);
     }
 
     public function destroyApi(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        try {
+            $request->user()->currentAccessToken()->delete();
 
-        return response()->json([
-            'message' => 'User logged out successfully',
-        ], 200);
+            return response()->json([
+                'message' => 'User Logged out successfully',
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Logout failed',
+                'status' => 'error',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
     }
 }
